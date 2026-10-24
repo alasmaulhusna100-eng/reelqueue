@@ -18,7 +18,14 @@ jobs:
         with:
           gradle-version: 8.9
       - name: Build debug APK
-        run: gradle :app:assembleDebug --no-daemon
+        run: |
+          set +e
+          gradle :app:assembleDebug --no-daemon --stacktrace > build.log 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            grep -E "^e: |^w: .*error|What went wrong|Execution failed|Could not|error:|not found|Caused by" -A2 build.log | head -40 | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-3500 | while read -r l; do echo "::error title=BUILD_ERROR::$l"; done
+          fi
+          exit $code
       - uses: actions/upload-artifact@v4
         with:
           name: ReelQueue-apk
