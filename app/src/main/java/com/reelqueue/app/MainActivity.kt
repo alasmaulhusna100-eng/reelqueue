@@ -129,14 +129,32 @@ class MainVm(private val app: Application) : AndroidViewModel(app) {
         } catch (_: Exception) {
         }
         val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return
-        rows = CsvParser.parse(String(bytes, Charsets.UTF_8))
+        val text = String(bytes, Charsets.UTF_8)
+        rows = if (TxtParser.looksLikeBlocks(text)) TxtParser.parse(text) else CsvParser.parse(text)
         csvName = nameOf(uri)
     }
 
     private fun timeFor(i: Int): Long = startMillis + i.toLong() * intervalMin * 60_000L
 
+    /** Finds which row belongs to a video: by file name, then by the number in the name, else by order. */
+    private fun rowIndexFor(i: Int, v: VideoRef): Int? {
+        val keyed = rows.any { it.fileName != null || it.number != null }
+        if (!keyed) return if (i in rows.indices) i else null
+        val base = v.name.substringBeforeLast('.').lowercase()
+        val byName = rows.indexOfFirst { it.fileName?.substringBeforeLast('.')?.lowercase() == base }
+        if (byName >= 0) return byName
+        val n = Regex("(\\d+)(?!.*\\d)").find(base)?.value?.toIntOrNull()
+        if (n != null) {
+            val byNum = rows.indexOfFirst { it.number == n }
+            if (byNum >= 0) return byNum
+        }
+        return null
+    }
+
+    private fun rowFor(i: Int, v: VideoRef): CsvRow? = rowIndexFor(i, v)?.let { rows[it] }
+
     fun previewItems(): List<Item> = videos.mapIndexed { i, v ->
-        val r = rows.getOrNull(i)
+        val r = rowFor(i, v)
         Item(
             index = i,
             videoUri = v.uri.toString(),
@@ -152,9 +170,14 @@ class MainVm(private val app: Application) : AndroidViewModel(app) {
         if (pageId.isBlank()) p += "Page ID দিন"
         if (token.isBlank()) p += "Access Token দিন"
         if (videos.isEmpty()) p += "ভিডিও বাছাই করুন"
-        if (rows.isEmpty()) p += "CSV ফাইল বাছাই করুন"
-        if (videos.isNotEmpty() && rows.isNotEmpty() && rows.size < videos.size)
-            p += "ভিডিও ${videos.size}টি, কিন্তু CSV-তে টাইটেল মাত্র ${rows.size}টি"
+        if (rows.isEmpty()) p += "টাইটেল ফাইল বাছাই করুন"
+        if (videos.isNotEmpty() && rows.isNotEmpty()) {
+            val missing = videos.indices.filter { rowIndexFor(it, videos[it]) == null }
+            if (missing.isNotEmpty()) {
+                val names = missing.take(3).joinToString(", ") { videos[it].name }
+                p += "${missing.size}টি ভিডিওর টাইটেল ফাইলে পাওয়া যায়নি: $names" + if (missing.size > 3) " …" else ""
+            }
+        }
         if (intervalMin < 1) p += "ব্যবধান কমপক্ষে ১ মিনিট দিন"
         if (startMillis < System.currentTimeMillis() + 11 * 60_000L)
             p += "শুরুর সময় এখন থেকে কমপক্ষে ১১ মিনিট পরে দিন"
@@ -163,10 +186,14 @@ class MainVm(private val app: Application) : AndroidViewModel(app) {
 
     fun warnings(): List<String> {
         val w = mutableListOf<String>()
-        if (rows.size > videos.size && videos.isNotEmpty())
-            w += "CSV-তে ${rows.size}টি লাইন, ভিডিও ${videos.size}টি — বাড়তি লাইন বাদ যাবে"
-        if (videos.isNotEmpty() && rows.isNotEmpty() && videos.indices.any { rows.getOrNull(it)?.title.isNullOrBlank() })
-            w += "কিছু ভিডিওর টাইটেল ফাঁকা"
+        if (videos.isNotEmpty() && rows.isNotEmpty()) {
+            val used = videos.indices.mapNotNull { rowIndexFor(it, videos[it]) }.toSet().size
+            if (rows.size > used) w += "ফাইলে ${rows.size}টি এন্ট্রি, ভিডিও মিলেছে ${used}টির — বাকি এন্ট্রি বাদ যাবে"
+            if (videos.indices.any { rowFor(it, videos[it])?.title.isNullOrBlank() })
+                w += "কিছু ভিডিওর টাইটেল ফাঁকা"
+            if (videos.indices.any { (rowFor(it, videos[it])?.description?.length ?: 0) > 5000 })
+                w += "কিছু ডেসক্রিপশন ৫০০০ অক্ষরের বেশি লম্বা — ফেসবুক না নিতে পারে"
+        }
         if (videos.isNotEmpty() && timeFor(videos.size - 1) > System.currentTimeMillis() + 30L * 24 * 3600_000)
             w += "শেষ ভিডিওর সময় ৩০ দিনের বেশি দূরে — ফেসবুক না নিলে ব্যবধান কমান"
         return w
@@ -279,11 +306,11 @@ fun App(vm: MainVm = viewModel()) {
                             onClick = { videoPicker.launch(arrayOf("video/*")) },
                             modifier = Modifier.fillMaxWidth()
                         ) { Text(if (vm.videos.isEmpty()) "ভিডিও বাছাই করুন" else "${vm.videos.size}টি ভিডিও বাছাই হয়েছে (বদলান)") }
-                        Text("ভিডিও ফাইলের নাম অনুযায়ী ক্রম হবে (1, 2, 3 … বা 01, 02 …)", fontSize = 12.sp, color = Color.Gray)
+                        Text("ভিডিওর ফাইলের নাম আর টাইটেল ফাইলের নাম/নম্বর মিলিয়ে টাইটেল বসবে", fontSize = 12.sp, color = Color.Gray)
                         OutlinedButton(
                             onClick = { csvPicker.launch(arrayOf("text/*", "application/csv", "application/vnd.ms-excel", "*/*")) },
                             modifier = Modifier.fillMaxWidth()
-                        ) { Text(if (vm.rows.isEmpty()) "CSV ফাইল বাছাই করুন" else "${vm.csvName} — ${vm.rows.size}টি লাইন") }
+                        ) { Text(if (vm.rows.isEmpty()) "টাইটেল ফাইল বাছাই করুন (TXT / CSV)" else "${vm.csvName} — ${vm.rows.size}টি এন্ট্রি") }
                     }
                 }
             }

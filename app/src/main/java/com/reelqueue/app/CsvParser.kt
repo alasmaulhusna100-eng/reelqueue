@@ -1,6 +1,11 @@
 package com.reelqueue.app
 
-data class CsvRow(val title: String, val description: String)
+data class CsvRow(
+    val title: String,
+    val description: String,
+    val number: Int? = null,
+    val fileName: String? = null
+)
 
 object CsvParser {
     private val TITLE_KEYS = setOf("title", "টাইটেল", "শিরোনাম")
