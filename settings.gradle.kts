@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ReelQueue"
+rootProject.name = "AutoPostPro"
 include(":app")
