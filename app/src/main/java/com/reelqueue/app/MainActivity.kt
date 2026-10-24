@@ -112,7 +112,7 @@ class MainVm(private val app: Application) : AndroidViewModel(app) {
         return uri.lastPathSegment.orEmpty()
     }
 
-    fun setVideos(uris: List<Uri>) {
+    fun pickVideos(uris: List<Uri>) {
         if (uris.isEmpty()) return
         videos = uris.map { u ->
             try {
@@ -123,7 +123,7 @@ class MainVm(private val app: Application) : AndroidViewModel(app) {
         }.sortedWith { a, b -> naturalCompare(a.name, b.name) }
     }
 
-    fun setCsv(uri: Uri) {
+    fun pickCsv(uri: Uri) {
         try {
             app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: Exception) {
@@ -218,10 +218,10 @@ fun App(vm: MainVm = viewModel()) {
     val running by JobState.running.collectAsStateWithLifecycle()
 
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        vm.setVideos(uris)
+        vm.pickVideos(uris)
     }
     val csvPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) vm.setCsv(uri)
+        if (uri != null) vm.pickCsv(uri)
     }
 
     val pendingRetry = remember { mutableStateOf(false) }
